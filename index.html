@@ -995,7 +995,7 @@ function farmStats(){let alive=0,ready=0,dry=0,dead=0;S.soil.forEach(s=>{const c
 /* ===== 05 ACTIONS: player, tools, interactions, ambient life ===== */
 const keys={};const mouse={x:0,y:0,active:false};const cam={x:0,y:0};let camX=0,camY=0,Z=1;
 const DIRV={left:[-1,0],right:[1,0],up:[0,-1],down:[0,1]};
-const P={anim:0,moving:false,cool:0,swing:0};
+const P={anim:0,moving:false,cool:0,swing:0,toolT:0};
 const floats=[],parts=[],BUTTERFLIES=[];
 function addFloat(x,y,txt,col='#fff'){floats.push({x,y,txt,col,t:0})}
 function puff(tx,ty,col){for(let i=0;i<7;i++)parts.push({x:tx*TILE+16,y:ty*TILE+18,vx:rnd(-40,40),vy:rnd(-60,-15),t:0,life:rnd(.35,.6),col,s:rnd(1.5,3)})}
@@ -1005,7 +1005,7 @@ const canStand=(x,y)=>!(blocked(x-7,y-4)||blocked(x+7,y-4)||blocked(x-7,y+3)||bl
 
 function updatePlayer(dt){
  let dx=(keys.right?1:0)-(keys.left?1:0),dy=(keys.down?1:0)-(keys.up?1:0);
- P.cool=Math.max(0,P.cool-dt);P.swing=Math.max(0,P.swing-dt);
+ P.cool=Math.max(0,P.cool-dt);P.swing=Math.max(0,P.swing-dt);P.toolT=Math.max(0,P.toolT-dt);
  if(dx||dy){
   const l=Math.hypot(dx,dy);dx/=l;dy/=l;const sp=118*(keys.run?1.6:1)*(S.energy<=0?.6:1);
   const mx=dx*sp*dt,my=dy*sp*dt;
@@ -1017,6 +1017,16 @@ function updatePlayer(dt){
  if(keys.use||keys.mouse)useInput();
 }
 function facingTile(){const d=DIRV[S.dir];return{x:Math.floor((S.px+d[0]*20)/TILE),y:Math.floor((S.py-6+d[1]*22)/TILE),far:false}}
+/* is the tile under the cursor something the selected item can act on? */
+function tileUseful(t,it){
+ if(!it||!inb(t.x,t.y))return false;const k=ti(t.x,t.y),s=S.soil.get(k);
+ if(it.t==='tool'&&it.id==='hoe')return s?!!(s.c&&s.c.dead):(G[k]===GR&&!SOL[k]&&!FEN[k]);
+ if(it.t==='tool'&&it.id==='can')return G[k]===WATER||(t.x===13&&t.y===17)||(!!s&&!s.w);
+ if(it.t==='tool'&&it.id==='basket')return !!(s&&s.c&&!s.c.dead&&s.c.gp>=CROP[s.c.id].days);
+ if(it.t==='seed')return !!s&&!s.c;
+ if(it.t==='fert')return !!s&&!s.f;
+ return false;
+}
 function targetTile(){
  if(mouse.active){const tx=Math.floor((camX+mouse.x/Z)/TILE),ty=Math.floor((camY+mouse.y/Z)/TILE);const d=Math.hypot(tx*TILE+16-S.px,ty*TILE+16-(S.py-8));return{x:tx,y:ty,far:d>2.7*TILE}}
  return facingTile();
@@ -1025,7 +1035,7 @@ function useInput(){
  if(P.cool>0)return;const t=targetTile();
  if(t.far){toast('Too far. Walk closer to that tile.');P.cool=.4;return}
  const cx=t.x*TILE+16-S.px,cy=t.y*TILE+16-(S.py-8);if(mouse.active){S.dir=Math.abs(cx)>Math.abs(cy)?(cx<0?'left':'right'):(cy<0?'up':'down')}
- P.cool=.28;P.swing=.2;useAt(t.x,t.y);
+ P.cool=.3;P.swing=.2;P.toolT=.36;useAt(t.x,t.y);
 }
 function spend(n){const c=Math.ceil(n*(S.weather==='heat'?1.5:1));if(S.energy<c){toast('Too tired! Eat something or sleep in your bahay kubo.','bad');sfx('error');return false}S.energy-=c;return true}
 function refillCan(){S.water=S.maxWater;sfx('water');toast('Watering can refilled.');hotDirty=true}
@@ -1139,10 +1149,33 @@ const LIGHT=[[0,12,18,52,.72],[5,20,30,70,.62],[6,255,160,110,.22],[7,255,200,15
 function lightAt(h){for(let i=0;i<LIGHT.length-1;i++){const a=LIGHT[i],b=LIGHT[i+1];if(h>=a[0]&&h<=b[0]){const t=(h-a[0])/(b[0]-a[0]||1);return[lerp(a[1],b[1],t),lerp(a[2],b[2],t),lerp(a[3],b[3],t),lerp(a[4],b[4],t)]}}return[0,0,0,0]}
 
 /* ----- characters ----- */
-function drawPerson(g,x,y,dir,anim,moving,pal,swing){
+function heldTool(){if(MODE!=='play')return null;const it=curItem();return it&&it.t==='tool'?it.id:null}
+/* tool in the player's hand: asarol (hoe) swings down, the watering can tilts and pours */
+function drawTool(g,tool,hx,hy,face,p){
+ g.save();g.translate(hx,hy);g.scale(face,1);
+ if(tool==='hoe'){
+  const rot=p<0?.9:p<.3?lerp(.9,-.25,p/.3):p<.7?lerp(-.25,2.1,(p-.3)/.4):lerp(2.1,.9,(p-.7)/.3);
+  g.rotate(rot);g.strokeStyle='#7a4e22';g.lineWidth=2.4;g.lineCap='round';g.beginPath();g.moveTo(0,5);g.lineTo(0,-17);g.stroke();
+  g.fillStyle='#b9c0c6';g.strokeStyle='#6b747b';g.lineWidth=.8;g.beginPath();g.moveTo(-1.5,-19);g.lineTo(6.5,-18.5);g.lineTo(7,-12.5);g.lineTo(3.2,-14);g.lineTo(-1.5,-14.5);g.closePath();g.fill();g.stroke();
+ }else if(tool==='can'){
+  const rot=p<0?0:p<.25?lerp(0,1.0,p/.25):p<.8?1.0:lerp(1.0,0,(p-.8)/.2);
+  g.rotate(rot);g.translate(0,-2);
+  g.strokeStyle='#2f6fa6';g.lineWidth=1.6;g.beginPath();g.arc(-5.5,-2,3.4,Math.PI*.5,Math.PI*1.5);g.stroke();
+  g.strokeStyle='#3d86c0';g.lineWidth=2;g.beginPath();g.moveTo(4,0);g.lineTo(11,-7);g.stroke();rrect(g,9.2,-9.6,4.4,2.6,1,'#3d86c0');
+  rrect(g,-5,-6,10,9,2.2,'#58a6e0');rrect(g,-5,-6,10,2.4,1.2,'#7fc0ee');
+  if(p>=.2&&p<.85){g.fillStyle='rgba(150,210,255,.9)';for(let i=0;i<4;i++){const q=((p*5+i*.27)%1);g.fillRect(12.5+q*3,-8+q*(14+i*2),1.4,1.4+q)}}
+ }else if(tool==='basket'){
+  g.translate(0,p<0?0:-Math.sin(p*Math.PI)*2);rrect(g,-6,-6,12,8,2.4,'#b98a4a');g.strokeStyle='#8a6128';g.lineWidth=.8;
+  for(let i=-4;i<=4;i+=2.7){g.beginPath();g.moveTo(i,-6);g.lineTo(i,2);g.stroke()}g.beginPath();g.moveTo(-6,-2.5);g.lineTo(6,-2.5);g.stroke();
+  g.strokeStyle='#8a6128';g.lineWidth=1.6;g.beginPath();g.arc(0,-6,5.5,Math.PI,0);g.stroke();
+ }
+ g.restore();
+}
+function drawPerson(g,x,y,dir,anim,moving,pal,swing,tool,tp){
  const bob=moving?Math.abs(Math.sin(anim))*1.6:0,st=moving?Math.sin(anim)*3:0,dv=DIRV[dir]||[0,1],so=swing>0?Math.sin(swing/.2*Math.PI)*3:0;
  g.save();g.translate(x,y);ell(g,0,1,8,3,'rgba(0,0,0,.25)');g.translate(dv[0]*so,dv[1]*so*.6);
- const side=dir==='left'||dir==='right';
+ const side=dir==='left'||dir==='right',tf=dir==='left'?-1:1,tbob=moving?Math.abs(Math.sin(anim))*1.6:0;
+ if(tool&&dir==='up')drawTool(g,tool,side?0:7,-10-tbob,tf,tp);
  g.fillStyle=pal.pants;
  if(side){g.fillRect(-3+st,-9,3.2,9);g.fillRect(0-st,-9,3.2,9)}else{g.fillRect(-5,-9,4.2,9-Math.max(0,st)*.5);g.fillRect(.8,-9,4.2,9-Math.max(0,-st)*.5)}
  g.fillStyle=pal.skin;if(side){g.fillRect(-1.5+st*.7,-17-bob,3,8)}else{g.fillRect(-8,-17-bob+Math.max(0,-st)*.4,2.6,8);g.fillRect(5.4,-17-bob+Math.max(0,st)*.4,2.6,8)}
@@ -1154,6 +1187,7 @@ function drawPerson(g,x,y,dir,anim,moving,pal,swing){
  if(pal.hat==='salakot'){ell(g,0,-29-bob,12.5,4.2,'#d9b66a');poly(g,[[-7.5,-29-bob],[0,-38-bob],[7.5,-29-bob]],'#e6c47a');g.strokeStyle='#a98a45';g.lineWidth=1;g.beginPath();g.moveTo(-4,-33-bob);g.lineTo(4,-33-bob);g.moveTo(-12,-29-bob);g.lineTo(12,-29-bob);g.stroke()}
  else if(pal.hat==='bun'){ell(g,0,-31-bob,3.6,3.2,pal.hair)}
  else if(pal.hat==='cap'){ell(g,0,-29.5-bob,6,3,'#c94a3a');rrect(g,-6.5,-30-bob,13,2.4,1,'#a83a2c');if(side)rrect(g,dir==='left'?-10:4,-29-bob,6,2,1,'#a83a2c')}
+ if(tool&&dir!=='up')drawTool(g,tool,side?tf*3:7,-10-tbob,tf,tp);
  g.restore();
 }
 function drawCarabao(g,a){g.save();g.translate(a.x,a.y);if(a.dir==='right')g.scale(-1,1);const st=a.moving?Math.sin(a.anim)*2.5:0;
@@ -1197,7 +1231,7 @@ function render(T,dt){
  if(MODE==='play')ents.push({y:S.py,p:1});
  NPCS.forEach(n=>ents.push({y:n.y,n}));ANIMALS.forEach(a=>{if(!a.water)ents.push({y:a.y,a})});
  ents.sort((a,b)=>a.y-b.y);let ei=0;
- const draw=e=>{if(e.p)drawPerson(ctx,S.px,S.py,S.dir,P.anim,P.moving,{skin:'#c98d5e',shirt:S.shirt,pants:'#4a4560',hat:'salakot',hair:'#2a1f18'},P.swing);
+ const draw=e=>{if(e.p)drawPerson(ctx,S.px,S.py,S.dir,P.anim,P.moving,{skin:'#c98d5e',shirt:S.shirt,pants:'#4a4560',hat:'salakot',hair:'#2a1f18'},P.swing,heldTool(),P.toolT>0?1-P.toolT/.36:-1);
   else if(e.n)drawPerson(ctx,e.n.x,e.n.y,e.n.dir,e.n.anim,e.n.moving,e.n.pal,0);
   else if(e.a.k==='carabao')drawCarabao(ctx,e.a);else drawChicken(ctx,e.a,T)};
  for(let y=ty0;y<=ty1;y++){
@@ -1207,7 +1241,7 @@ function render(T,dt){
  }
  ANIMALS.forEach(a=>{if(a.water)drawDuck(ctx,a,T)});
  /* target highlight */
- if(MODE==='play'&&!UI){const t=targetTile();if(!t.far&&inb(t.x,t.y)){const s=S.soil.get(ti(t.x,t.y));const ripe=s&&s.c&&!s.c.dead&&s.c.gp>=CROP[s.c.id].days;ctx.strokeStyle=ripe?'#ffd34a':'rgba(255,255,255,'+(.55+.25*Math.sin(T*6))+')';ctx.lineWidth=2;ctx.strokeRect(t.x*TILE+1,t.y*TILE+1,TILE-2,TILE-2);ctx.fillStyle='rgba(255,255,255,.08)';ctx.fillRect(t.x*TILE,t.y*TILE,TILE,TILE)}}
+ if(MODE==='play'&&!UI&&(!P.moving||mouse.active||keys.use)){const t=targetTile();if(!t.far&&inb(t.x,t.y)&&tileUseful(t,curItem())){const s=S.soil.get(ti(t.x,t.y));const ripe=s&&s.c&&!s.c.dead&&s.c.gp>=CROP[s.c.id].days;ctx.strokeStyle=ripe?'#ffd34a':'rgba(255,255,255,'+(.55+.25*Math.sin(T*6))+')';ctx.lineWidth=2;ctx.strokeRect(t.x*TILE+1,t.y*TILE+1,TILE-2,TILE-2);ctx.fillStyle='rgba(255,255,255,.08)';ctx.fillRect(t.x*TILE,t.y*TILE,TILE,TILE)}}
  const day=lightAt(S.time/60)[3];
  if(day<.4&&S.time>=300){BUTTERFLIES.forEach(b=>{if(b.x>camX-20&&b.x<camX+w+20&&b.y>camY-20&&b.y<camY+h+20)drawButterfly(ctx,b)})}
  parts.forEach(p=>{ctx.globalAlpha=1-p.t/p.life;ctx.fillStyle=p.col;ctx.fillRect(p.x,p.y,p.s,p.s)});ctx.globalAlpha=1;
